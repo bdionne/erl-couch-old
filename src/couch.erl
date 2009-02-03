@@ -18,11 +18,18 @@
 %%       Contains raw JSON string returned by CouchDB
 
 -module(couch).
-
+-compile(debug_info).
 -define(JSON_ENCODE(V), mochijson2:encode(V)).
 -define(JSON_DECODE(V), mochijson2:decode(V)).
 
--compile(debug_info).
+-ifdef(debug).
+-define(DEBUG(Format, Args), io:format(Format, [Args])).
+-else.
+-define(DEBUG(Format, Args), true).
+-endif.
+
+
+
 
 -export([get_host/1]).
 
@@ -402,7 +409,7 @@ couch_save_doc(Doc, Options) ->
 	JSONDoc = iolist_to_binary(?JSON_ENCODE(FullDoc)),
 	RequestFunc = proplists:get_value(request_func, Options),
 
-        io:format("sending json : ~s ~n",[JSONDoc]),
+        ?DEBUG("sending json : ~s ~n",[JSONDoc]),
 
 	{JSON, Raw} = RequestFunc(post, JSONDoc, Options),
 
@@ -436,7 +443,7 @@ couch_save_doc(DocName, Doc, Options) ->
 							LatestRevDoc;
 						{#json_object{data=DataList}, _} ->
 							Rev = proplists:get_value("_rev", DataList),
-							io:format("Revision in save ~p~n", [Rev]),
+							?DEBUG("Revision in save ~p~n", [Rev]),
 							couch_update_doc(DocName, Rev, Doc, Options)
 					end;
 				undefined ->
@@ -449,7 +456,7 @@ couch_save_doc(DocName, Doc, Options) ->
 couch_update_doc(DocName, Rev, Doc, Options) ->
 	FullDoc = [{"_rev", Rev}, {"value", Doc}],
 	JSONDoc = iolist_to_binary(?JSON_ENCODE(FullDoc)),
-	io:format("JSONDoc ~s~n", [JSONDoc]),
+	?DEBUG("JSONDoc ~s~n", [JSONDoc]),
 	RequestFunc = proplists:get_value(request_func, Options),
 
 	NewOpts = Options ++ [{docname, DocName}],
@@ -483,7 +490,7 @@ couch_delete_doc(DocName, Options) ->
 %% Request functions
 inets_request(Method, Data, Options) ->
 	Host = couch_get_url(Options),
-	io:format("Requesting ~s~n", [Host]),
+	?DEBUG("Requesting ~s~n", [Host]),
 	{ok, {_Status, _Headers, Body}} =
 		if
 			Method =:= post; Method =:= put ->
@@ -501,13 +508,13 @@ inets_request(Method, Data, Options) ->
 					[]
 				)
 		end,
-        io:format("received ~s ~n", [Body]),
+        ?DEBUG("received ~s ~n", [Body]),
 
 	{?JSON_DECODE(Body), Body}.
 
 ibrowse_request(Method, Data, Options) ->
     Host = couch_get_url(Options),
-    io:format("Requesting ~s ~n", [Host]),
+    ?DEBUG("Requesting ~s ~n", [Host]),
     {ok, _Status, _Headers, Body} =
 	if
 	    Method =:= post; Method =:= put ->
@@ -517,13 +524,13 @@ ibrowse_request(Method, Data, Options) ->
 		  Method,
 		  Data);
 	    true ->
-		io:format("sending ... ~s ~n",[Host]),
+		?DEBUG("sending ... ~s ~n",[Host]),
 		ibrowse:send_req(
 		  Host,
 		  [{"Content-Type", "application/json"}],
 		  get)
 	end,
-    io:format("received ~s ~n", [Body]),
+    ?DEBUG("received ~s ~n", [Body]),
 
     {?JSON_DECODE(Body), Body}.
 
