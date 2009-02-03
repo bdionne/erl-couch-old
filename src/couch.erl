@@ -216,7 +216,9 @@ get_doc_rev(DB, DocName, Rev, Options) ->
 %%    Saves a doc to the database. The doc is assigned a server-generated ID
 %% @end
 save_doc(DB, Doc) ->
+    ?DEBUG("the doc.. ~w ~n ",[Doc]),
 	DB ! {self(), {save_doc, Doc}},
+    
 	receive
 		Response ->
 			Response
@@ -375,13 +377,10 @@ couch_all_dbs(Options) ->
 couch_get_db(DBName, Options) ->
 	RequestFunc = proplists:get_value(request_func, Options),
 	NewOpts = Options ++ [{db, DBName}],
-	{JSON, Raw} = RequestFunc(get, "", NewOpts),
-
-	{ok, #json_object{data=Data}=Response} = JSON,
-
-	case Data of
+	{Json, Raw} = RequestFunc(get, "", NewOpts),
+	case Json of
 		[{"error", _}] ->
-			{error, Response, Raw};
+			{error, Json, Raw};
 		_ ->
 			Pid = spawn(fun() -> database_loop(NewOpts) end),
 			Pid
@@ -405,22 +404,22 @@ couch_get_doc(_DocName, _Rev, _Options) ->
 	{error, not_implemented}.
 
 couch_save_doc(Doc, Options) ->
-	FullDoc = [{"value", Doc}],
-	JSONDoc = iolist_to_binary(?JSON_ENCODE(FullDoc)),
-	RequestFunc = proplists:get_value(request_func, Options),
+    ?DEBUG("saving for... ~s ~n",[Options]),
+    JSONDoc = iolist_to_binary(?JSON_ENCODE({Doc})),
+    RequestFunc = proplists:get_value(request_func, Options),
 
-        ?DEBUG("sending json : ~s ~n",[JSONDoc]),
+    ?DEBUG("sending json : ~s ~n",[JSONDoc]),
 
-	{JSON, Raw} = RequestFunc(post, JSONDoc, Options),
+    {Json, Raw} = RequestFunc(post, JSONDoc, Options),
 
-	{ok, #json_object{data=Data}=Response} = JSON,
 
-	case Data of
-		[{"error", _}] ->
-			{error, JSON, Raw};
-		_ ->
-			{Response, Raw}
-	end.
+
+    case Json of
+	[{"error", _}] ->
+	    {error, Json, Raw};
+	_ ->
+	    Json
+    end.
 
 couch_save_doc(DocName, Doc, Options) ->
 	FullDoc = [{"value", Doc}],
