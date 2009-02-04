@@ -16,7 +16,7 @@
 %% @type json_object() = {json_object, proplist()}
 %% @type raw_json() = string().
 %%       Contains raw JSON string returned by CouchDB
-
+%%
 -module(couch).
 -compile(debug_info).
 -define(JSON_ENCODE(V), mochijson2:encode(V)).
@@ -30,7 +30,7 @@
 
 
 
-
+-export([test/0]).
 -export([get_host/1]).
 
 -export([
@@ -107,12 +107,7 @@ all_dbs(Host) ->
 
 all_dbs(Host, Options) ->
 	Host ! {self(), {all_dbs, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 %% @spec get_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
 %%
@@ -123,12 +118,7 @@ get_db(Host, DBName) ->
 
 get_db(Host, DBName, Options) ->
 	Host ! {self(), {get_db, DBName, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 %% @spec create_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
 %%
@@ -139,12 +129,7 @@ create_db(Host, DBName) ->
 
 create_db(Host, DBName, Options) ->
 	Host ! {self(), {create_db, DBName, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 %% @spec delete_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
 %%
@@ -155,12 +140,7 @@ delete_db(Host, DBName) ->
 
 delete_db(Host, DBName, Options) ->
 	Host ! {self(), {delete_db, DBName, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 %% @spec all_docs(DB::pid()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -182,12 +162,7 @@ get_doc(DB, DocName) ->
 
 get_doc(DB, DocName, Options) ->
 	DB ! {self(), {get_doc, DocName, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 %% @spec get_doc_rev(DB::pid(), DocName::string(), Rev::integer()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -202,12 +177,7 @@ get_doc_rev(DB, DocName, Rev) ->
 
 get_doc_rev(DB, DocName, Rev, Options) ->
 	DB ! {self(), {get_doc_rev, DocName, Rev, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 
 %% @spec save_doc(DB::pid(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
@@ -216,15 +186,8 @@ get_doc_rev(DB, DocName, Rev, Options) ->
 %%    Saves a doc to the database. The doc is assigned a server-generated ID
 %% @end
 save_doc(DB, Doc) ->
-    ?DEBUG("the doc.. ~w ~n ",[Doc]),
-	DB ! {self(), {save_doc, Doc}},
-    
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+    DB ! {self(), {save_doc, Doc}},    
+    receive_and_return().
 
 %% @spec save_doc(DB::pid(), DocName::string(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -236,12 +199,7 @@ save_doc(DB, DocName, Doc) ->
 
 save_doc(DB, DocName, Doc, Options) ->
 	DB ! {self(), {save_doc, DocName, Doc, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 %% @spec update_doc(DB::pid(), DocName::string(), Rev::integer(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -254,12 +212,7 @@ update_doc(DB, DocName, Rev, Doc) ->
 
 update_doc(DB, DocName, Rev, Doc, Options) ->
 	DB ! {self(), {update_doc, DocName, Rev, Doc, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 %% @spec delete_doc(DB::pid(), DocName::string()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -271,12 +224,7 @@ delete_doc(DB, DocName) ->
 
 delete_doc(DB, DocName, Options) ->
 	DB ! {self(), {delete_doc, DocName, Options}},
-	receive
-		Response ->
-			Response
-		after 10000 ->
-			{error, timeout}
-	end.
+	receive_and_return().
 
 
 
@@ -342,13 +290,13 @@ database_loop(Options) ->
 couch_create_db(DBName, Options) ->
 	RequestFunc = proplists:get_value(request_func, Options),
 	NewOpts = Options ++ [{db, DBName}],
-	{JSON, Raw} = RequestFunc(put, "", NewOpts),
+	{Json, Raw} = RequestFunc(put, "", NewOpts),
 
-	{ok, #json_object{data=Data}=Response} = JSON,
+	%%{ok, #json_object{data=Data}=Response} = JSON,
 
-	case Data of
+	case Json of
 		[{"error", _}] ->
-			{error, Response, Raw};
+			{error, Json, Raw};
 		_ ->
 			Pid = spawn(fun() -> database_loop(NewOpts) end),
 			Pid
@@ -357,15 +305,13 @@ couch_create_db(DBName, Options) ->
 couch_delete_db(DBName, Options) ->
 	RequestFunc = proplists:get_value(request_func, Options),
 	NewOpts = Options ++ [{db, DBName}],
-	{JSON, Raw} = RequestFunc(delete, "", NewOpts),
+	{Json, Raw} = RequestFunc(delete, "", NewOpts),
 
-	{ok, #json_object{data=Data}=Response} = JSON,
-
-	case Data of
+	case Json of
 		[{"error", _}] ->
-			{error, Response, Raw};
+			{error, Json, Raw};
 		_ ->
-			{ok, Response, Raw}
+			{ok, Json, Raw}
 	end.
 
 couch_all_dbs(Options) ->
@@ -404,15 +350,9 @@ couch_get_doc(_DocName, _Rev, _Options) ->
 	{error, not_implemented}.
 
 couch_save_doc(Doc, Options) ->
-    ?DEBUG("saving for... ~s ~n",[Options]),
-    JSONDoc = iolist_to_binary(?JSON_ENCODE({Doc})),
+    JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
     RequestFunc = proplists:get_value(request_func, Options),
-
-    ?DEBUG("sending json : ~s ~n",[JSONDoc]),
-
     {Json, Raw} = RequestFunc(post, JSONDoc, Options),
-
-
 
     case Json of
 	[{"error", _}] ->
@@ -422,17 +362,17 @@ couch_save_doc(Doc, Options) ->
     end.
 
 couch_save_doc(DocName, Doc, Options) ->
-	FullDoc = [{"value", Doc}],
-	JSONDoc = iolist_to_binary(?JSON_ENCODE(FullDoc)),
+	%%FullDoc = [{"value", Doc}],
+	JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
 	RequestFunc = proplists:get_value(request_func, Options),
 
 	NewOpts = Options ++ [{docname, DocName}],
 
-	{JSON, Raw} = RequestFunc(put, JSONDoc, NewOpts),
+	{Json, Raw} = RequestFunc(put, JSONDoc, NewOpts),
 
-	{ok, #json_object{data=Data}=Response} = JSON,
+	%%{ok, #json_object{data=Data}=Response} = JSON,
 
-	case Data of
+	case Json of
 		[{"error", _}] ->
 			case proplists:get_value(force, Options) of
 				true ->
@@ -446,10 +386,10 @@ couch_save_doc(DocName, Doc, Options) ->
 							couch_update_doc(DocName, Rev, Doc, Options)
 					end;
 				undefined ->
-					{error, Response, Raw}
+					{error, Json, Raw}
 			end;
 		_ ->
-			{Response, Raw}
+			Json
 	end.
 
 couch_update_doc(DocName, Rev, Doc, Options) ->
@@ -516,7 +456,7 @@ ibrowse_request(Method, Data, Options) ->
     ?DEBUG("Requesting ~s ~n", [Host]),
     {ok, _Status, _Headers, Body} =
 	if
-	    Method =:= post; Method =:= put ->
+	    Method =:= post; Method =:= put; Method =:= delete ->
 		ibrowse:send_req(
 		  Host,
 		  [{"Content-Type", "application/json"}],
@@ -575,3 +515,20 @@ add_url_part(Part, Prefix) ->
 		_ ->
 			lists:flatten([Prefix | Part])
 	end.
+
+receive_and_return() ->
+    receive
+	Response ->
+	    Response
+    after 5000 ->
+	    {error, timeout}
+    end.
+%%
+%% This test assumes a couchdb server running locally
+%%
+test() ->
+    Host = get_host([{host, "127.0.0.1"},{port, 5984},{ibrowse, true}]),
+    Db = create_db(Host,"erl-couch"),
+    save_doc(Db,{[{<<"foo">>,<<"bar">>},{<<"name">>,<<"boo">>}]}),
+    delete_db(Host,"erl-couch"),
+    io:format("test complete ~n",[]).
