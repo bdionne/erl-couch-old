@@ -44,7 +44,7 @@
          get_doc/2     , get_doc/3     ,
          get_doc_rev/3 , get_doc_rev/4 ,
          save_doc/2    , save_doc/3    , save_doc/4,
-         update_doc/4  , update_doc/5  ,
+         %%update_doc/4  , update_doc/5  ,
          delete_doc/2  , delete_doc/3
         ]).
 -export([
@@ -52,11 +52,6 @@
          all_docs/1    , all_docs/2
         ]).
 
-
-%% This is the record used by json.erl to encode JSON objects
-%% Note that data is acually a PropList
-
--record(json_object, {data=[]}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -207,12 +202,13 @@ save_doc(DB, DocName, Doc, Options) ->
 %%    Save a doc when the doc's revision is known
 %% @end
 
-update_doc(DB, DocName, Rev, Doc) ->
-	update_doc(DB, DocName, Rev, Doc, []).
 
-update_doc(DB, DocName, Rev, Doc, Options) ->
-	DB ! {self(), {update_doc, DocName, Rev, Doc, Options}},
-	receive_and_return().
+%% update_doc(DB, DocName, Rev, Doc) ->
+%% 	update_doc(DB, DocName, Rev, Doc, []).
+
+%% update_doc(DB, DocName, Rev, Doc, Options) ->
+%% 	DB ! {self(), {update_doc, DocName, Rev, Doc, Options}},
+%% 	receive_and_return().
 
 %% @spec delete_doc(DB::pid(), DocName::string()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -273,11 +269,13 @@ database_loop(Options) ->
 			Reply = couch_save_doc(DocName, Doc, NewOpts),
 			Pid ! Reply,
 			database_loop(Options);
-		{Pid, {update_doc, DocName, Rev, Doc, Opts}} ->
-			NewOpts = Options ++ Opts,
-			Reply = couch_update_doc(DocName, Rev, Doc, NewOpts),
-			Pid ! Reply,
-			database_loop(Options);
+
+%% 		{Pid, {update_doc, DocName, Rev, Doc, Opts}} ->
+%% 			NewOpts = Options ++ Opts,
+%% 			Reply = couch_update_doc(DocName, Rev, Doc, NewOpts),
+%% 			Pid ! Reply,
+%% 			database_loop(Options);
+
 		{Pid, {delete_doc, DocName, Opts}} ->
 			NewOpts = Options ++ Opts,
 			Reply = couch_delete_doc(DocName, NewOpts),
@@ -291,8 +289,6 @@ couch_create_db(DBName, Options) ->
 	RequestFunc = proplists:get_value(request_func, Options),
 	NewOpts = Options ++ [{db, DBName}],
 	{Json, Raw} = RequestFunc(put, "", NewOpts),
-
-	%%{ok, #json_object{data=Data}=Response} = JSON,
 
 	case Json of
 		[{"error", _}] ->
@@ -311,7 +307,7 @@ couch_delete_db(DBName, Options) ->
 		[{"error", _}] ->
 			{error, Json, Raw};
 		_ ->
-			{ok, Json, Raw}
+			{ok, Json}
 	end.
 
 couch_all_dbs(Options) ->
@@ -335,15 +331,13 @@ couch_get_db(DBName, Options) ->
 couch_get_doc(DocName, Options) ->
 	NewOpts = Options ++ [{docname, DocName}],
 	RequestFunc = proplists:get_value(request_func, Options),
-	{JSON, Raw} = RequestFunc(get, [], NewOpts),
+	{Json, Raw} = RequestFunc(get, [], NewOpts),
 
-	{ok, #json_object{data=Data}=Response} = JSON,
-
-	case Data of
+	case Json of
 		[{"error", _}] ->
-			{error, JSON, Raw};
+			{error, Json, Raw};
 		_ ->
-			{Response, Raw}
+			{ok, Json}
 	end.
 
 couch_get_doc(_DocName, _Rev, _Options) ->
@@ -358,19 +352,16 @@ couch_save_doc(Doc, Options) ->
 	[{"error", _}] ->
 	    {error, Json, Raw};
 	_ ->
-	    Json
+	    {ok, Json}
     end.
 
 couch_save_doc(DocName, Doc, Options) ->
-	%%FullDoc = [{"value", Doc}],
 	JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
 	RequestFunc = proplists:get_value(request_func, Options),
 
 	NewOpts = Options ++ [{docname, DocName}],
 
 	{Json, Raw} = RequestFunc(put, JSONDoc, NewOpts),
-
-	%%{ok, #json_object{data=Data}=Response} = JSON,
 
 	case Json of
 		[{"error", _}] ->
@@ -380,8 +371,8 @@ couch_save_doc(DocName, Doc, Options) ->
 					case LatestRevDoc of
 						{error, _, _} ->
 							LatestRevDoc;
-						{#json_object{data=DataList}, _} ->
-							Rev = proplists:get_value("_rev", DataList),
+						{RevJson, _} ->
+							Rev = proplists:get_value("_rev", RevJson),
 							?DEBUG("Revision in save ~p~n", [Rev]),
 							couch_update_doc(DocName, Rev, Doc, Options)
 					end;
@@ -389,41 +380,39 @@ couch_save_doc(DocName, Doc, Options) ->
 					{error, Json, Raw}
 			end;
 		_ ->
-			Json
+			{ok, Json}
 	end.
 
-couch_update_doc(DocName, Rev, Doc, Options) ->
-	FullDoc = [{"_rev", Rev}, {"value", Doc}],
-	JSONDoc = iolist_to_binary(?JSON_ENCODE(FullDoc)),
-	?DEBUG("JSONDoc ~s~n", [JSONDoc]),
-	RequestFunc = proplists:get_value(request_func, Options),
+couch_update_doc(_, _, _, _) ->
+    {error, notimplemented}.
+%% couch_update_doc(DocName, Rev, Doc, Options) ->
+%% 	FullDoc = [{"_rev", Rev}, {"value", Doc}],
+%% 	JSONDoc = iolist_to_binary(?JSON_ENCODE(FullDoc)),
+%% 	?DEBUG("JSONDoc ~s~n", [JSONDoc]),
+%% 	RequestFunc = proplists:get_value(request_func, Options),
 
-	NewOpts = Options ++ [{docname, DocName}],
+%% 	NewOpts = Options ++ [{docname, DocName}],
 
-	{JSON, Raw} = RequestFunc(put, JSONDoc, NewOpts),
+%% 	{Json, Raw} = RequestFunc(put, JSONDoc, NewOpts),
 
-	{ok, #json_object{data=Data}=Response} = JSON,
-
-	case Data of
-		[{"error", _}] ->
-			{error, JSON, Raw};
-		_ ->
-			{Response, Raw}
-	end.
+%% 	case Json of
+%% 		[{"error", _}] ->
+%% 			{error, Json, Raw};
+%% 		_ ->
+%% 			{ok, Json}
+%% 	end.
 
 couch_delete_doc(DocName, Options) ->
 	RequestFunc = proplists:get_value(request_func, Options),
 	NewOpts = Options ++ [{docname, DocName}],
 
-	{JSON, Raw} = RequestFunc(delete, [], NewOpts),
+	{Json, Raw} = RequestFunc(delete, [], NewOpts),
 
-	{ok, #json_object{data=Data}=Response} = JSON,
-
-	case Data of
+	case Json of
 		[{"error", _}] ->
-			{error, JSON, Raw};
+			{error, Json, Raw};
 		_ ->
-			{Response, Raw}
+			{ok, Json}
 	end.
 
 %% Request functions
