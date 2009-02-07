@@ -18,46 +18,41 @@
 %%       Contains raw JSON string returned by CouchDB
 %%
 -module(couch).
+
 -compile(debug_info).
+
 -define(JSON_ENCODE(V), mochijson2:encode(V)).
+
 -define(JSON_DECODE(V), mochijson2:decode(V)).
 
 -ifdef(debug).
+
 -define(DEBUG(Format, Args), io:format(Format, [Args])).
+
 -else.
+
 -define(DEBUG(Format, Args), true).
+
 -endif.
 
-
-
 -export([test/0]).
+
 -export([get_host/1]).
 
--export([
-         create_db/2   , create_db/3,
-         get_db/2      , get_db/3,
-         delete_db/2   , delete_db/3
-        ]).
+-export([create_db/2, create_db/3, delete_db/2,
+	 delete_db/3, get_db/2, get_db/3]).
+
+-export([delete_doc/2, delete_doc/3, get_doc/2,
+	 get_doc/3, get_doc_rev/3, get_doc_rev/4, save_doc/2,
+	 save_doc/3, save_doc/4, update_doc/3, update_doc/4]).
 
 
--export([
-         get_doc/2     , get_doc/3     ,
-         get_doc_rev/3 , get_doc_rev/4 ,
-         save_doc/2    , save_doc/3    , save_doc/4,
-         %%update_doc/4  , update_doc/5  ,
-         delete_doc/2  , delete_doc/3
-        ]).
--export([
-         all_dbs/1     , all_dbs/2     ,
-         all_docs/1    , all_docs/2
-        ]).
 
-
+-export([all_dbs/1, all_dbs/2, all_docs/1, all_docs/2]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%  PUBLIC API                                                              %%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 
 %% @spec get_host(Options::OptionList) -> Host::pid()
 %% where
@@ -72,21 +67,21 @@
 %%       If you specify {ibrowse, true}, ibrowse will be used instead of inets
 %% @end
 get_host(Options) ->
-	RequestFunction = case proplists:get_value(ibrowse, Options) of
-		true ->
-				  
-			fun(Method, Data, Opts) ->
-				ibrowse_request(Method, Data, Opts)
-			end;
-		_ ->
-			fun(Method, Data, Opts) ->
-				inets_request(Method, Data, Opts)
-			end
-	end,
-	NewOpts = Options ++ [{request_func, RequestFunction}],
-
-	Pid = spawn(fun() -> host_loop(NewOpts) end),
-	Pid.
+    RequestFunction = case proplists:get_value(ibrowse,
+					       Options)
+			  of
+			  true ->
+			      fun (Method, Data, Opts, Args) ->
+				      ibrowse_request(Method, Data, Opts, Args)
+			      end;
+			  _ ->
+			      fun (Method, Data, Opts, Args) ->
+				      inets_request(Method, Data, Opts, Args)
+			      end
+		      end,
+    NewOpts = Options ++ [{request_func, RequestFunction}],
+    Pid = spawn(fun () -> host_loop(NewOpts) end),
+    Pid.
 
 %% @spec all_dbs(Host::pid()) -> {DatabaseList, raw_json()}
 %% where
@@ -97,67 +92,61 @@ get_host(Options) ->
 %%       Retrieves all dbs on the host
 %% @end
 
-all_dbs(Host) ->
-	all_dbs(Host, []).
+all_dbs(Host) -> all_dbs(Host, []).
 
 all_dbs(Host, Options) ->
-	Host ! {self(), {all_dbs, Options}},
-	receive_and_return().
+    Host ! {self(), {all_dbs, Options}},
+    receive_and_return().
 
 %% @spec get_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
 %%
 %% @doc Retrieves specified db from the host
 
-get_db(Host, DBName) ->
-	get_db(Host, DBName, []).
+get_db(Host, DBName) -> get_db(Host, DBName, []).
 
 get_db(Host, DBName, Options) ->
-	Host ! {self(), {get_db, DBName, Options}},
-	receive_and_return().
+    Host ! {self(), {get_db, DBName, Options}},
+    receive_and_return().
 
 %% @spec create_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
 %%
 %% @doc Creates specified db on the host
 
-create_db(Host, DBName) ->
-	create_db(Host, DBName, []).
+create_db(Host, DBName) -> create_db(Host, DBName, []).
 
 create_db(Host, DBName, Options) ->
-	Host ! {self(), {create_db, DBName, Options}},
-	receive_and_return().
+    Host ! {self(), {create_db, DBName, Options}},
+    receive_and_return().
 
 %% @spec delete_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
 %%
 %% @doc Deletes specified db on the host
 
-delete_db(Host, DBName) ->
-	delete_db(Host, DBName, []).
+delete_db(Host, DBName) -> delete_db(Host, DBName, []).
 
 delete_db(Host, DBName, Options) ->
-	Host ! {self(), {delete_db, DBName, Options}},
-	receive_and_return().
+    Host ! {self(), {delete_db, DBName, Options}},
+    receive_and_return().
 
 %% @spec all_docs(DB::pid()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
 %% @doc Retrieves info on all docs available on the host
 %% @equiv get_doc(DB, "_all_docs")
 
-all_docs(DB) ->
-	all_docs(DB, []).
+all_docs(DB) -> all_docs(DB, []).
 
 all_docs(DB, Options) ->
-	get_doc(DB, "_all_docs", Options).
+    get_doc(DB, "_all_docs", Options).
 
 %% @spec get_doc(DB::pid(), DocName::string()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
 %% @doc Retrieves the entire contents of the specified document
 
-get_doc(DB, DocName) ->
-	get_doc(DB, DocName, []).
+get_doc(DB, DocName) -> get_doc(DB, DocName, []).
 
 get_doc(DB, DocName, Options) ->
-	DB ! {self(), {get_doc, DocName, Options}},
-	receive_and_return().
+    DB ! {self(), {get_doc, DocName, Options}},
+    receive_and_return().
 
 %% @spec get_doc_rev(DB::pid(), DocName::string(), Rev::integer()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -168,12 +157,11 @@ get_doc(DB, DocName, Options) ->
 %% @end
 
 get_doc_rev(DB, DocName, Rev) ->
-	get_doc_rev(DB, DocName, Rev, []).
+    get_doc_rev(DB, DocName, Rev, []).
 
 get_doc_rev(DB, DocName, Rev, Options) ->
-	DB ! {self(), {get_doc_rev, DocName, Rev, Options}},
-	receive_and_return().
-
+    DB ! {self(), {get_doc_rev, DocName, Rev, Options}},
+    receive_and_return().
 
 %% @spec save_doc(DB::pid(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -181,8 +169,7 @@ get_doc_rev(DB, DocName, Rev, Options) ->
 %%    Saves a doc to the database. The doc is assigned a server-generated ID
 %% @end
 save_doc(DB, Doc) ->
-    DB ! {self(), {save_doc, Doc}},    
-    receive_and_return().
+    DB ! {self(), {save_doc, Doc}}, receive_and_return().
 
 %% @spec save_doc(DB::pid(), DocName::string(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -190,11 +177,11 @@ save_doc(DB, Doc) ->
 %%    Saves a doc to the database with a user-supplied ID
 %% @end
 save_doc(DB, DocName, Doc) ->
-	save_doc(DB, DocName, Doc, []).
+    save_doc(DB, DocName, Doc, []).
 
 save_doc(DB, DocName, Doc, Options) ->
-	DB ! {self(), {save_doc, DocName, Doc, Options}},
-	receive_and_return().
+    DB ! {self(), {save_doc, DocName, Doc, Options}},
+    receive_and_return().
 
 %% @spec update_doc(DB::pid(), DocName::string(), Rev::integer(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
@@ -202,322 +189,295 @@ save_doc(DB, DocName, Doc, Options) ->
 %%    Save a doc when the doc's revision is known
 %% @end
 
+update_doc(DB, DocName, Doc) ->
+    update_doc(DB, DocName, Doc, []).
 
-%% update_doc(DB, DocName, Rev, Doc) ->
-%% 	update_doc(DB, DocName, Rev, Doc, []).
-
-%% update_doc(DB, DocName, Rev, Doc, Options) ->
-%% 	DB ! {self(), {update_doc, DocName, Rev, Doc, Options}},
-%% 	receive_and_return().
+update_doc(DB, DocName, Doc, Options) ->
+    DB ! {self(), {update_doc, DocName, Doc, Options}},
+    receive_and_return().
 
 %% @spec delete_doc(DB::pid(), DocName::string()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
 %%
 %% @doc
 %%    Delete a doc from the database
 %% @end
-delete_doc(DB, DocName) ->
-	delete_doc(DB, DocName, []).
+delete_doc(DB, DocName) -> delete_doc(DB, DocName, []).
 
 delete_doc(DB, DocName, Options) ->
-	DB ! {self(), {delete_doc, DocName, Options}},
-	receive_and_return().
-
-
+    DB ! {self(), {delete_doc, DocName, Options}},
+    receive_and_return().
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%  INTERNAL FUNCTIONS                                                      %%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 host_loop(Options) ->
-	receive
-		{Pid, {create_db, DBName, Opts}} ->
-			Reply = couch_create_db(DBName, Options ++ Opts),
-			Pid ! Reply,
-			host_loop(Options);
-		{Pid, {get_db, DBName, Opts}} ->
-			Reply = couch_get_db(DBName, Options ++ Opts),
-			Pid ! Reply,
-			host_loop(Options);
-		{Pid, {all_dbs, Opts}} ->
-			Reply = couch_all_dbs(Options ++ Opts),
-			Pid ! Reply,
-			host_loop(Options);
-		{Pid, {delete_db, DBName, Opts}} ->
-			Reply = couch_delete_db(DBName, Options ++ Opts),
-			Pid ! Reply,
-			host_loop(Options)
-	end.
+    receive
+	{Pid, {create_db, DBName, Opts}} ->
+	    Reply = couch_create_db(DBName, Options ++ Opts),
+	    Pid ! Reply,
+	    host_loop(Options);
+	{Pid, {get_db, DBName, Opts}} ->
+	    Reply = couch_get_db(DBName, Options ++ Opts),
+	    Pid ! Reply,
+	    host_loop(Options);
+	{Pid, {all_dbs, Opts}} ->
+	    Reply = couch_all_dbs(Options ++ Opts),
+	    Pid ! Reply,
+	    host_loop(Options);
+	{Pid, {delete_db, DBName, Opts}} ->
+	    Reply = couch_delete_db(DBName, Options ++ Opts),
+	    Pid ! Reply,
+	    host_loop(Options)
+    end.
 
 database_loop(Options) ->
-	receive
-		{Pid, {get_doc, DocName, Opts}} ->
-			NewOpts = Options ++ Opts,
-			Reply = couch_get_doc(DocName, NewOpts),
-			Pid ! Reply,
-			database_loop(Options);
-		{Pid, {get_doc_rev, DocName, Rev, Opts}} ->
-			NewOpts = Options ++ Opts,
-			Reply = couch_get_doc(DocName, Rev, NewOpts),
-			Pid ! Reply,
-			database_loop(Options);
-		{Pid, {save_doc, Doc}} ->
-			Reply = couch_save_doc(Doc, Options),
-			Pid ! Reply,
-			database_loop(Options);
-		{Pid, {save_doc, DocName, Doc, Opts}} ->
-			NewOpts = Options ++ Opts,
-			Reply = couch_save_doc(DocName, Doc, NewOpts),
-			Pid ! Reply,
-			database_loop(Options);
-
-%% 		{Pid, {update_doc, DocName, Rev, Doc, Opts}} ->
-%% 			NewOpts = Options ++ Opts,
-%% 			Reply = couch_update_doc(DocName, Rev, Doc, NewOpts),
-%% 			Pid ! Reply,
-%% 			database_loop(Options);
-
-		{Pid, {delete_doc, DocName, Opts}} ->
-			NewOpts = Options ++ Opts,
-			Reply = couch_delete_doc(DocName, NewOpts),
-			Pid ! Reply,
-			database_loop(Options)
-	end.
+    receive
+	{Pid, {get_doc, DocName, Opts}} ->
+	    NewOpts = Options ++ Opts,
+	    Reply = couch_get_doc(DocName, NewOpts),
+	    Pid ! Reply,
+	    database_loop(Options);
+	{Pid, {get_doc_rev, DocName, Rev, Opts}} ->
+	    NewOpts = Options ++ Opts,
+	    Reply = couch_get_doc(DocName, Rev, NewOpts),
+	    Pid ! Reply,
+	    database_loop(Options);
+	{Pid, {save_doc, Doc}} ->
+	    Reply = couch_save_doc(Doc, Options),
+	    Pid ! Reply,
+	    database_loop(Options);
+	{Pid, {save_doc, DocName, Doc, Opts}} ->
+	    NewOpts = Options ++ Opts,
+	    Reply = couch_save_doc(DocName, Doc, NewOpts, post),
+	    Pid ! Reply,
+	    database_loop(Options);
+	{Pid, {update_doc, DocName, Doc, Opts}} ->
+	    NewOpts = Options ++ Opts,
+	    Reply = couch_save_doc(DocName, Doc, NewOpts, put),
+	    Pid ! Reply,
+	    database_loop(Options);
+	{Pid, {delete_doc, DocName, Opts}} ->
+	    NewOpts = Options ++ Opts,
+	    Reply = couch_delete_doc(DocName, NewOpts),
+	    Pid ! Reply,
+	    database_loop(Options)
+    end.
 
 %% Internal functions
 
 couch_create_db(DBName, Options) ->
-	RequestFunc = proplists:get_value(request_func, Options),
-	NewOpts = Options ++ [{db, DBName}],
-	{Json, Raw} = RequestFunc(put, "", NewOpts),
-
-	case Json of
-		[{"error", _}] ->
-			{error, Json, Raw};
-		_ ->
-			Pid = spawn(fun() -> database_loop(NewOpts) end),
-			Pid
-	end.
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    NewOpts = Options ++ [{db, DBName}],
+    {Json, Raw} = RequestFunc(put, "", NewOpts, []),
+    case Json of
+	[{"error", _}] -> {error, Json, Raw};
+	_ ->
+	    Pid = spawn(fun () -> database_loop(NewOpts) end), Pid
+    end.
 
 couch_delete_db(DBName, Options) ->
-	RequestFunc = proplists:get_value(request_func, Options),
-	NewOpts = Options ++ [{db, DBName}],
-	{Json, Raw} = RequestFunc(delete, "", NewOpts),
-
-	case Json of
-		[{"error", _}] ->
-			{error, Json, Raw};
-		_ ->
-			{ok, Json}
-	end.
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    NewOpts = Options ++ [{db, DBName}],
+    {Json, Raw} = RequestFunc(delete, "", NewOpts, []),
+    case Json of
+	[{"error", _}] -> {error, Json, Raw};
+	_ -> {ok, Json}
+    end.
 
 couch_all_dbs(Options) ->
-	RequestFunc = proplists:get_value(request_func, Options),
-	NewOpts = Options ++ [{db, "_all_dbs"}],
-	{Json, _} = RequestFunc(get, "", NewOpts),
-        Json.
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    NewOpts = Options ++ [{db, "_all_dbs"}],
+    {Json, _} = RequestFunc(get, "", NewOpts, []),
+    Json.
 
 couch_get_db(DBName, Options) ->
-	RequestFunc = proplists:get_value(request_func, Options),
-	NewOpts = Options ++ [{db, DBName}],
-	{Json, Raw} = RequestFunc(get, "", NewOpts),
-	case Json of
-		[{"error", _}] ->
-			{error, Json, Raw};
-		_ ->
-			Pid = spawn(fun() -> database_loop(NewOpts) end),
-			Pid
-	end.
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    NewOpts = Options ++ [{db, DBName}],
+    {Json, Raw} = RequestFunc(get, "", NewOpts, []),
+    case Json of
+	[{"error", _}] -> {error, Json, Raw};
+	_ ->
+	    Pid = spawn(fun () -> database_loop(NewOpts) end), Pid
+    end.
 
 couch_get_doc(DocName, Options) ->
-	NewOpts = Options ++ [{docname, DocName}],
-	RequestFunc = proplists:get_value(request_func, Options),
-	{Json, Raw} = RequestFunc(get, [], NewOpts),
+    NewOpts = Options ++ [{docname, DocName}],
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    {Json, Raw} = RequestFunc(get, [], NewOpts, []),
+    case Json of
+	[{"error", _}] -> {error, Json, Raw};
+	_ -> {ok, Json}
+    end.
 
-	case Json of
-		[{"error", _}] ->
-			{error, Json, Raw};
-		_ ->
-			{ok, Json}
-	end.
-
-couch_get_doc(_DocName, _Rev, _Options) ->
-	{error, not_implemented}.
+couch_get_doc(DocName, Rev, Options) ->
+    NewOpts = Options ++ [{docname, DocName}],
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    {Json, Raw} = RequestFunc(get, [], NewOpts, {"_rev", Rev}),
+    case Json of
+	{[{<<"error">>, _},_]} -> {error, Json, Raw};
+	_ -> {ok, Json}
+    end.
+    
 
 couch_save_doc(Doc, Options) ->
     JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
-    RequestFunc = proplists:get_value(request_func, Options),
-    {Json, Raw} = RequestFunc(post, JSONDoc, Options),
-
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    {Json, Raw} = RequestFunc(post, JSONDoc, Options, []),
     case Json of
-	[{"error", _}] ->
-	    {error, Json, Raw};
-	_ ->
-	    {ok, Json}
+	[{"error", _}] -> {error, Json, Raw};
+	_ -> {ok, Json}
     end.
 
-couch_save_doc(DocName, Doc, Options) ->
-	JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
-	RequestFunc = proplists:get_value(request_func, Options),
+couch_save_doc(DocName, Doc, Options, PostOrPut) ->
+    JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    NewOpts = Options ++ [{docname, DocName}],
+    {Json, Raw} = RequestFunc(PostOrPut, JSONDoc, NewOpts, []),
+    ?DEBUG("the decoded Json ~s ~n",[Json]),
+    case Json of
+	{[{<<"error">>, _},_]} ->
+	    case proplists:get_value(force, Options) of
+		true ->
+		    LatestRevDoc = couch_get_doc(DocName, Options),
+		    case LatestRevDoc of
+			{error, _, _} -> LatestRevDoc;
+			{ok, RevJson} ->
+			    Rev = proplists:get_value(<<"_rev">>, hd(tuple_to_list(RevJson))),
+			    ?DEBUG("Revision in save ~p~n", [Rev]),
+			    couch_save_doc(DocName, inject_rev(Doc, Rev), Options, put)
+		    end;
+		undefined -> {error, Json, Raw}
+	    end;
+	_ -> {ok, Json}
+    end.
 
-	NewOpts = Options ++ [{docname, DocName}],
+inject_rev(Doc, Rev) ->
+    TupList = hd(tuple_to_list(Doc)),
+    NewList = lists:keyreplace(<<"_rev">>,1,TupList,{<<"_rev">>,Rev}),
+    {NewList}.
 
-	{Json, Raw} = RequestFunc(put, JSONDoc, NewOpts),
-
-	case Json of
-		[{"error", _}] ->
-			case proplists:get_value(force, Options) of
-				true ->
-					LatestRevDoc = couch_get_doc(DocName, Options),
-					case LatestRevDoc of
-						{error, _, _} ->
-							LatestRevDoc;
-						{RevJson, _} ->
-							Rev = proplists:get_value("_rev", RevJson),
-							?DEBUG("Revision in save ~p~n", [Rev]),
-							couch_update_doc(DocName, Rev, Doc, Options)
-					end;
-				undefined ->
-					{error, Json, Raw}
-			end;
-		_ ->
-			{ok, Json}
-	end.
-
-couch_update_doc(_, _, _, _) ->
-    {error, notimplemented}.
-%% couch_update_doc(DocName, Rev, Doc, Options) ->
-%% 	FullDoc = [{"_rev", Rev}, {"value", Doc}],
-%% 	JSONDoc = iolist_to_binary(?JSON_ENCODE(FullDoc)),
-%% 	?DEBUG("JSONDoc ~s~n", [JSONDoc]),
-%% 	RequestFunc = proplists:get_value(request_func, Options),
-
-%% 	NewOpts = Options ++ [{docname, DocName}],
-
-%% 	{Json, Raw} = RequestFunc(put, JSONDoc, NewOpts),
-
-%% 	case Json of
-%% 		[{"error", _}] ->
-%% 			{error, Json, Raw};
-%% 		_ ->
-%% 			{ok, Json}
-%% 	end.
 
 couch_delete_doc(DocName, Options) ->
-	RequestFunc = proplists:get_value(request_func, Options),
-	NewOpts = Options ++ [{docname, DocName}],
-
-	{Json, Raw} = RequestFunc(delete, [], NewOpts),
-
-	case Json of
-		[{"error", _}] ->
-			{error, Json, Raw};
-		_ ->
-			{ok, Json}
-	end.
+    RequestFunc = proplists:get_value(request_func,
+				      Options),
+    NewOpts = Options ++ [{docname, DocName}],
+    {Json, Raw} = RequestFunc(delete, [], NewOpts, []),
+    case Json of
+	[{"error", _}] -> {error, Json, Raw};
+	_ -> {ok, Json}
+    end.
 
 %% Request functions
-inets_request(Method, Data, Options) ->
-	Host = couch_get_url(Options),
-	?DEBUG("Requesting ~s~n", [Host]),
-	{ok, {_Status, _Headers, Body}} =
-		if
-			Method =:= post; Method =:= put ->
-				http:request(
-					Method,
-					{Host, [{"Content-Type", "application/json"}], [], Data},
-					[],
-					[]
-				);
-			true ->
-				http:request(
-					Method,
-					{Host, [{"Content-Type", "application/json"}]},
-					[],
-					[]
-				)
-		end,
-        ?DEBUG("received ~s ~n", [Body]),
-
-	{?JSON_DECODE(Body), Body}.
-
-ibrowse_request(Method, Data, Options) ->
-    Host = couch_get_url(Options),
-    ?DEBUG("Requesting ~s ~n", [Host]),
-    {ok, _Status, _Headers, Body} =
-	if
-	    Method =:= post; Method =:= put; Method =:= delete ->
-		ibrowse:send_req(
-		  Host,
-		  [{"Content-Type", "application/json"}],
-		  Method,
-		  Data);
-	    true ->
-		?DEBUG("sending ... ~s ~n",[Host]),
-		ibrowse:send_req(
-		  Host,
-		  [{"Content-Type", "application/json"}],
-		  get)
-	end,
+inets_request(Method, Data, Options, Args) ->
+    Host = couch_get_url(Options, Args),
+    ?DEBUG("Requesting ~s~n", [Host]),
+    {ok, {_Status, _Headers, Body}} = if Method =:= post;
+					 Method =:= put ->
+					      http:request(Method,
+							   {Host,
+							    [{"Content-Type",
+							      "application/json"}],
+							    [], Data},
+							   [], []);
+					 true ->
+					      http:request(Method,
+							   {Host,
+							    [{"Content-Type",
+							      "application/json"}]},
+							   [], [])
+				      end,
     ?DEBUG("received ~s ~n", [Body]),
-
     {?JSON_DECODE(Body), Body}.
 
+ibrowse_request(Method, Data, Options, Args) ->
+    Host = couch_get_url(Options, Args),
+    ?DEBUG("Requesting ~s ~n", [Host]),
+    {ok, _Status, _Headers, Body} = if Method =:= post;
+				       Method =:= put;
+				       Method =:= delete ->
+					    ibrowse:send_req(Host,
+							     [{"Content-Type",
+							       "application/json"}],
+							     Method, Data);
+				       true ->
+					    ibrowse:send_req(Host,
+							     [{"Content-Type",
+							       "application/json"}],
+							     get)
+				    end,
+    ?DEBUG("received ~s ~n", [Body]),
+    {?JSON_DECODE(Body), Body}.
 
 %% Utility functions
+couch_get_url(Options,[]) ->
+    couch_build_url(Options);
 
-couch_get_url(Options) ->
-	Host = case proplists:get_value(host, Options) of
-		undefined ->
-			"";
-		H ->
-			H
-	end,
-	Port = case proplists:get_value(port, Options) of
-		undefined ->
-			"";
-		P ->
-			P
-	end,
-	Database = case proplists:get_value(db, Options) of
-		undefined ->
-			"";
-		D ->
-			D
-	end,
-	Docname = case proplists:get_value(docname, Options) of
-		undefined ->
-			"";
-		Doc ->
-			Doc
-	end,
-	URL = add_url_part(Host, "http://") ++ add_url_part(Port, ":") ++
-	      add_url_part(Database, "/") ++ add_url_part(Docname, "/"),
-	URL.
+couch_get_url(Options,[H, T]) ->
+    Url = couch_build_url(Options),
+    AddFirstArg = lists:append(Url,["?",hd(tuple_to_list(H)), hd(tl(tuple_to_list(H)))]),
+    couch_get_rest_url(AddFirstArg,T).
+
+couch_get_rest_url(Url, []) ->
+    Url;
+
+couch_get_rest_url(Url,[H, T]) ->
+    AddArg = lists:append(Url,["&", hd(tuple_to_list(H)), hd(tl(tuple_to_list(H)))]), 
+    couch_get_rest_url(AddArg,T).
+
+
+couch_build_url(Options) ->
+    Host = case proplists:get_value(host, Options) of
+	       undefined -> "";
+	       H -> H
+	   end,
+    Port = case proplists:get_value(port, Options) of
+	       undefined -> "";
+	       P -> P
+	   end,
+    Database = case proplists:get_value(db, Options) of
+		   undefined -> "";
+		   D -> D
+	       end,
+    Docname = case proplists:get_value(docname, Options) of
+		  undefined -> "";
+		  Doc -> Doc
+	      end,
+    URL = add_url_part(Host, "http://") ++
+	add_url_part(Port, ":") ++
+	add_url_part(Database, "/") ++
+	add_url_part(Docname, "/"),
+    URL.
 
 add_url_part(Part, Prefix) when is_integer(Part) ->
-	add_url_part(integer_to_list(Part), Prefix);
-
+    add_url_part(integer_to_list(Part), Prefix);
 add_url_part(Part, Prefix) ->
-	case Part of
-		"" ->
-			"";
-		_ ->
-			lists:flatten([Prefix | Part])
-	end.
+    case Part of
+	"" -> "";
+	_ -> lists:flatten([Prefix | Part])
+    end.
 
 receive_and_return() ->
     receive
-	Response ->
-	    Response
-    after 5000 ->
-	    {error, timeout}
-    end.
+	Response -> Response after 5000 -> {error, timeout}
+			     end.
+
 %%
 %% This test assumes a couchdb server running locally
 %%
 test() ->
-    Host = get_host([{host, "127.0.0.1"},{port, 5984},{ibrowse, true}]),
-    Db = create_db(Host,"erl-couch"),
-    save_doc(Db,{[{<<"foo">>,<<"bar">>},{<<"name">>,<<"boo">>}]}),
-    delete_db(Host,"erl-couch"),
-    io:format("test complete ~n",[]).
+    Host = get_host([{host, "127.0.0.1"}, {port, 5984},
+		     {ibrowse, true}]),
+    Db = create_db(Host, "erl-couch"),
+    save_doc(Db,
+	     {[{<<"foo">>, <<"bar">>}, {<<"name">>, <<"boo">>}]}),
+    %%delete_db(Host, "erl-couch"),
+    io:format("test complete ~n", []).
