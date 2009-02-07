@@ -215,7 +215,7 @@ host_loop(HostUrl, RequestFunction) ->
 database_loop(DbUrl, RequestFunction) ->
     receive
 	{Pid, {get_doc, DocName, Args}} ->
-	    DocUrl = couch_get_docname_url(DbUrl,[{docname, DocName}]),
+	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
 	    Reply = couch_get_doc(DocUrl, RequestFunction, Args),
 	    Pid ! Reply,
 	    database_loop(DbUrl, RequestFunction);
@@ -224,17 +224,17 @@ database_loop(DbUrl, RequestFunction) ->
 	    Pid ! Reply,
 	    database_loop(DbUrl, RequestFunction);
 	{Pid, {save_doc, DocName, Doc, Args}} ->
-	    DocUrl = couch_get_docname_url(DbUrl,[{docname, DocName}]),
+	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
 	    Reply = couch_save_doc(DocUrl, RequestFunction, Doc, Args, post),
 	    Pid ! Reply,
 	    database_loop(DbUrl, RequestFunction);
 	{Pid, {update_doc, DocName, Doc, Args}} ->
-	    DocUrl = couch_get_docname_url(DbUrl,[{docname, DocName}]),
+	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
 	    Reply = couch_save_doc(DocUrl, RequestFunction, Doc, Args, put),
 	    Pid ! Reply,
 	    database_loop(DbUrl, RequestFunction);
 	{Pid, {delete_doc, DocName}} ->
-	    DocUrl = couch_get_docname_url(DbUrl,[{docname, DocName}]),
+	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
 	    Reply = couch_delete_doc(DocUrl, RequestFunction),
 	    Pid ! Reply,
 	    database_loop(DbUrl, RequestFunction)
@@ -242,8 +242,8 @@ database_loop(DbUrl, RequestFunction) ->
 
 %% Internal functions
 
-couch_create_db(HostUrl, RequestFunction, DBName) ->
-    DbUrl = couch_get_db_url(HostUrl, [{db, DBName}]),
+couch_create_db(HostUrl, RequestFunction, DbName) ->
+    DbUrl = HostUrl ++ add_url_part(DbName, "/"),
     {Json, Raw} = RequestFunction(put, "", DbUrl, []),
     case Json of
 	{[{<<"error">>, _},_]} -> {error, Json, Raw};
@@ -251,8 +251,8 @@ couch_create_db(HostUrl, RequestFunction, DBName) ->
 	    Pid = spawn(fun () -> database_loop(DbUrl, RequestFunction) end), Pid
     end.
 
-couch_delete_db(HostUrl, RequestFunction, DBName) ->
-    DbUrl = couch_get_db_url(HostUrl, [{db, DBName}]),
+couch_delete_db(HostUrl, RequestFunction, DbName) ->
+    DbUrl = HostUrl ++ add_url_part(DbName, "/"),
     {Json, Raw} = RequestFunction(delete, "", DbUrl, []),
     case Json of
 	{[{<<"error">>, _},_]} -> {error, Json, Raw};
@@ -263,8 +263,8 @@ couch_all_dbs(HostUrl, RequestFunction) ->
     {Json, _} = RequestFunction(get, "", HostUrl, []),
     Json.
 
-couch_get_db(HostUrl, RequestFunction, DBName) ->
-    DbUrl = couch_get_db_url(HostUrl, [{db, DBName}]),
+couch_get_db(HostUrl, RequestFunction, DbName) ->
+    DbUrl = HostUrl ++ add_url_part(DbName, "/"),
     {Json, Raw} = RequestFunction(get, [], DbUrl, []),
     case Json of
 	{[{<<"error">>, _},_]} -> {error, Json, Raw};
@@ -294,26 +294,8 @@ couch_save_doc(DocUrl, RequestFunction, Doc, Args, PostOrPut) ->
     {Json, Raw} = RequestFunction(PostOrPut, JSONDoc, DocUrl, Args),
     case Json of
 	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-%% 	    case proplists:get_value(force, Options) of
-%% 		true ->
-%% 		    LatestRevDoc = couch_get_doc(DocName, Options),
-%% 		    case LatestRevDoc of
-%% 			{error, _, _} -> LatestRevDoc;
-%% 			{ok, RevJson} ->
-%% 			    Rev = proplists:get_value(<<"_rev">>, hd(tuple_to_list(RevJson))),
-%% 			    ?DEBUG("Revision in save ~p~n", [Rev]),
-%% 			    couch_save_doc(DocName, inject_rev(Doc, Rev), Options, put)
-%% 		    end;
-%% 		undefined -> {error, Json, Raw}
-%% 	    end;
 	_ -> {ok, Json}
     end.
-
-%% inject_rev(Doc, Rev) ->
-%%     TupList = hd(tuple_to_list(Doc)),
-%%     NewList = lists:keyreplace(<<"_rev">>,1,TupList,{<<"_rev">>,Rev}),
-%%     {NewList}.
-
 
 couch_delete_doc(DocUrl, RequestFunction) ->
     {Json, Raw} = RequestFunction(delete, [], DocUrl, []),
@@ -368,14 +350,14 @@ couch_get_url(Url,[]) ->
     Url;
 
 couch_get_url(Url,[H | T]) ->
-    AddFirstArg = lists:append(Url,["?",hd(tuple_to_list(H)), "=", hd(tl(tuple_to_list(H)))]),
+    AddFirstArg = lists:append(Url,["?", element(1, H), "=", element(2, H)]),
     couch_get_rest_url(AddFirstArg,T).
 
 couch_get_rest_url(Url, []) ->
     Url;
 
 couch_get_rest_url(Url,[H, T]) ->
-    AddArg = lists:append(Url,["&", hd(tuple_to_list(H)), "=", hd(tl(tuple_to_list(H)))]), 
+    AddArg = lists:append(Url,["&", element(1, H), "=", element(2, H)]), 
     couch_get_rest_url(AddArg,T).
 
 
@@ -392,23 +374,6 @@ couch_get_host_url(Options) ->
 	add_url_part(Port, ":"),
     URL.
 
-couch_get_db_url(HostUrl, DbProps) ->
-   Database = case proplists:get_value(db, DbProps) of
-		   undefined -> "";
-		   D -> D
-	       end,
-    URL = HostUrl ++
-	add_url_part(Database, "/"),
-    URL.
-
-couch_get_docname_url(DbUrl, DocProps) ->
-    DocName = case proplists:get_value(docname, DocProps) of
-		   undefined -> "";
-		   D -> D
-	       end,
-    URL = DbUrl ++
-	add_url_part(DocName, "/"),
-    URL.
 
 add_url_part(Part, Prefix) when is_integer(Part) ->
     add_url_part(integer_to_list(Part), Prefix);
@@ -432,5 +397,5 @@ test() ->
     Db = create_db(Host, "erl-couch"),
     save_doc(Db,
 	     {[{<<"foo">>, <<"bar">>}, {<<"name">>, <<"boo">>}]}),
-    %%delete_db(Host, "erl-couch"),
+    delete_db(Host, "erl-couch"),
     io:format("test complete ~n", []).
