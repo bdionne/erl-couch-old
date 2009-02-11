@@ -17,7 +17,7 @@
 %% @type raw_json() = string().
 %%       Contains raw JSON string returned by CouchDB
 %%
--module(couch2).
+-module(erl_couch).
 
 -compile(debug_info).
 
@@ -44,6 +44,8 @@
 -export([delete_doc/2, get_doc/2, get_doc/3, save_doc/2, save_doc/3, save_doc/4, update_doc/3, update_doc/4]).
 
 -export([all_dbs/1, all_docs/1, all_docs/2]).
+
+-export([create_view/3]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%  PUBLIC API                                                              %%%
@@ -203,7 +205,7 @@ host_loop(HostUrl, RequestFunction) ->
 	    Pid ! Reply,
 	    host_loop(HostUrl, RequestFunction);
 	{Pid, {all_dbs}} ->
-	    Reply = couch_all_dbs(HostUrl, RequestFunction),
+	    Reply = couch_all_dbs(HostUrl ++ "/_all_dbs", RequestFunction),
 	    Pid ! Reply,
 	    host_loop(HostUrl, RequestFunction);
 	{Pid, {delete_db, DBName}} ->
@@ -225,7 +227,7 @@ database_loop(DbUrl, RequestFunction) ->
 	    database_loop(DbUrl, RequestFunction);
 	{Pid, {save_doc, DocName, Doc, Args}} ->
 	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
-	    Reply = couch_save_doc(DocUrl, RequestFunction, Doc, Args, post),
+	    Reply = couch_save_doc(DocUrl, RequestFunction, Doc, Args, put),
 	    Pid ! Reply,
 	    database_loop(DbUrl, RequestFunction);
 	{Pid, {update_doc, DocName, Doc, Args}} ->
@@ -254,14 +256,11 @@ couch_create_db(HostUrl, RequestFunction, DbName) ->
 couch_delete_db(HostUrl, RequestFunction, DbName) ->
     DbUrl = HostUrl ++ add_url_part(DbName, "/"),
     {Json, Raw} = RequestFunction(delete, "", DbUrl, []),
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ -> {ok, Json}
-    end.
+    process_result(Json, Raw).
 
 couch_all_dbs(HostUrl, RequestFunction) ->    
-    {Json, _} = RequestFunction(get, "", HostUrl, []),
-    Json.
+    {Json, Raw} = RequestFunction(get, "", HostUrl, []),
+    process_result(Json, Raw).
 
 couch_get_db(HostUrl, RequestFunction, DbName) ->
     DbUrl = HostUrl ++ add_url_part(DbName, "/"),
@@ -274,35 +273,23 @@ couch_get_db(HostUrl, RequestFunction, DbName) ->
 
 couch_get_doc(DocUrl, RequestFunction, Args) ->
     {Json, Raw} = RequestFunction(get, [], DocUrl, Args),
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ -> {ok, Json}
-    end.
+    process_result(Json, Raw).
 
     
 
 couch_save_doc(DbUrl, RequestFunction, Doc) ->
     JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
     {Json, Raw} = RequestFunction(post, JSONDoc, DbUrl, []),
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ -> {ok, Json}
-    end.
+    process_result(Json, Raw).
 
 couch_save_doc(DocUrl, RequestFunction, Doc, Args, PostOrPut) ->
     JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
     {Json, Raw} = RequestFunction(PostOrPut, JSONDoc, DocUrl, Args),
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ -> {ok, Json}
-    end.
+    process_result(Json, Raw).
 
 couch_delete_doc(DocUrl, RequestFunction) ->
     {Json, Raw} = RequestFunction(delete, [], DocUrl, []),
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ -> {ok, Json}
-    end.
+    process_result(Json, Raw).
 
 %% Request functions
 inets_request(Method, Data, Url, Args) ->
@@ -329,6 +316,7 @@ inets_request(Method, Data, Url, Args) ->
 ibrowse_request(Method, Data, Url, Args) ->
     Host = couch_get_url(Url, Args),
     ?DEBUG("Requesting ~s ~n", [Host]),
+    ?DEBUG("Sending ~s ~n", [Data]),
     {ok, _Status, _Headers, Body} = if Method =:= post;
 				       Method =:= put;
 				       Method =:= delete ->
@@ -387,6 +375,14 @@ receive_and_return() ->
     receive
 	Response -> Response after 5000 -> {error, timeout}
 			     end.
+%%
+%%
+process_result(Json, Raw) ->
+    case Json of
+	{[{<<"error">>, _},_]} -> {error, Json, Raw};
+	_ -> {ok, Json}
+    end.
+
 
 %%
 %% This test assumes a couchdb server running locally
@@ -395,7 +391,31 @@ test() ->
     Host = get_host([{host, "127.0.0.1"}, {port, 5984},
 		     {ibrowse, true}]),
     Db = create_db(Host, "erl-couch"),
-    save_doc(Db,
-	     {[{<<"foo">>, <<"bar">>}, {<<"name">>, <<"boo">>}]}),
+    save_doc(Db,{[{<<"foo">>, <<"bar">>}, {<<"name">>, <<"boo">>}]}),
+    save_doc(Db,"myfoo%2Fbar",{[{<<"foo2">>, <<"bar2">>}, {<<"name">>, <<"boo">>}]}),
+    save_doc(Db,"_design%2FageN",{create_view("ageN", <<"javascript">>, [{<<"foo-5">>, <<"function(doc) { if (doc.age % 5 == 0 )  emit(doc.name, doc.age); }">>}])}),
+
     delete_db(Host, "erl-couch"),
     io:format("test complete ~n", []).
+
+
+
+%%
+%% @private
+%%
+%% helper function for creating view documents, borrowed from erlang_couchdb
+create_view(ViewClass, Language, Views) ->
+    [
+        {<<"_id">>, list_to_binary("_design/" ++ ViewClass)},
+        {<<"language">>, Language},
+        {<<"views">>, {[
+            begin
+                case View of
+                    {Name, Map} -> 
+                        {Name, {[{<<"map">>, Map}]}};
+                    {Name, Map, Reduce} ->
+                        {Name, {[{<<"map">>, Map}, {<<"reduce">>, Reduce}]}}
+                end
+            end || View <- Views
+        ]}}].
+
