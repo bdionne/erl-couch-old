@@ -37,7 +37,7 @@
 
 -export([test/0]).
 
--export([get_host/1]).
+-export([get_host/1, get_stats/1]).
 
 -export([create_db/2, delete_db/2, get_db/2]).
 
@@ -99,6 +99,10 @@ all_dbs(Host) ->
 
 get_db(Host, DBName) ->
     Host ! {self(), {get_db, DBName}},
+    receive_and_return().
+
+get_stats(Host) ->
+    Host ! {self(), {stats}},
     receive_and_return().
 
 %% @spec create_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
@@ -208,6 +212,10 @@ host_loop(HostUrl, RequestFunction) ->
 	    Reply = couch_all_dbs(HostUrl ++ "/_all_dbs", RequestFunction),
 	    Pid ! Reply,
 	    host_loop(HostUrl, RequestFunction);
+	{Pid, {stats}} ->
+	    Reply = couch_stats(HostUrl ++ "/_stats", RequestFunction),
+	    Pid ! Reply,
+	    host_loop(HostUrl, RequestFunction);
 	{Pid, {delete_db, DBName}} ->
 	    Reply = couch_delete_db(HostUrl, RequestFunction, DBName),
 	    Pid ! Reply,
@@ -259,6 +267,10 @@ couch_delete_db(HostUrl, RequestFunction, DbName) ->
     process_result(Json, Raw).
 
 couch_all_dbs(HostUrl, RequestFunction) ->    
+    {Json, Raw} = RequestFunction(get, "", HostUrl, []),
+    process_result(Json, Raw).
+
+couch_stats(HostUrl, RequestFunction) ->    
     {Json, Raw} = RequestFunction(get, "", HostUrl, []),
     process_result(Json, Raw).
 
