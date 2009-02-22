@@ -1,23 +1,16 @@
-%%% @copyright Copyright (c) 2007, Dmitrii 'Mamut' Dimandt.  All Rights Reserved.
+%% 
+%%% @private
+%%% File:      erl_couch.erl
+%%% @author    Bob Dionne <> []
+%%% @copyright 2009 Dionne Associates, LLC.
+%%% @doc  
 %%%
-%%% @doc
-%%% The contents of this file are subject to the Erlang Public License,
-%%% Version 1.1, (the "License"); you may not use this file except in
-%%% compliance with the License. You should have received a copy of the
-%%% Erlang Public License along with this software. If not, it can be
-%%% retrieved via the world wide web at http://www.erlang.org/.
-%%%
-%%% Software distributed under the License is distributed on an "AS IS"
-%%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%%% the License for the specific language governing rights and limitations
-%%% under the License.
-%%% @end
-
-%% @type json_object() = {json_object, proplist()}
-%% @type raw_json() = string().
-%%       Contains raw JSON string returned by CouchDB
-%%
+%%% @end 
+%%% Created : 21 Feb 2009 by Bob Dionne <>
+%%%-------------------------------------------------------------------
 -module(erl_couch).
+
+-behaviour(gen_server).
 
 -compile(debug_info).
 
@@ -27,7 +20,7 @@
 
 -ifdef(debug).
 
--define(DEBUG(Format, Args), io:format(Format, [Args])).
+-define(DEBUG(Format, Args), io:format(Format, Args)).
 
 -else.
 
@@ -35,271 +28,234 @@
 
 -endif.
 
--export([test/0]).
 
--export([get_host/1, get_all_stats/1, get_stats/2]).
+%% API
+-export([start/1, stop/0, get_all_stats/0, get_stats/1, all_dbs/0, get_db/1, create_db/1, delete_db/1, all_docs/1, all_docs/2, get_doc/2, get_doc/3, save_doc/2, save_doc/3, save_doc/4, update_doc/3, update_doc/4, delete_doc/2]).
 
--export([create_db/2, delete_db/2, get_db/2]).
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+	 terminate/2, code_change/3]).
 
--export([delete_doc/2, get_doc/2, get_doc/3, save_doc/2, save_doc/3, save_doc/4, update_doc/3, update_doc/4]).
-
--export([all_dbs/1, all_docs/1, all_docs/2]).
-
--export([create_view/3]).
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%  PUBLIC API                                                              %%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%% @spec get_host(Options::OptionList) -> Host::pid()
-%% where
-%%       OptionList = [Option]
-%%       Option = {host, string()} | {port, integer()} | {ibrowse, true}
+%% Note to self: perhaps declare a record for state
 %%
-%% @doc
-%%       Retrievs a CouchDB host.
-%%
-%%       Required options: host, port
-%%
-%%       If you specify {ibrowse, true}, ibrowse will be used instead of inets
-%% @end
-get_host(Options) ->
-    RequestFunction = case proplists:get_value(ibrowse,
+%%====================================================================
+%% API
+%%====================================================================
+%%--------------------------------------------------------------------
+%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
+%% Description: Starts the server
+%%--------------------------------------------------------------------
+start(Options) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
+
+stop() ->
+    gen_server:call(?MODULE, stop).
+
+
+all_dbs() ->
+    gen_server:call(?MODULE, {all_dbs}).
+
+get_db(DbName) ->
+    gen_server:call(?MODULE, {get_db, DbName}).
+
+get_all_stats() ->
+    gen_server:call(?MODULE, {all_stats}).
+
+get_stats(Stats) ->
+    gen_server:call(?MODULE, {stats, Stats}).
+
+create_db(DbName) ->
+    gen_server:call(?MODULE, {create_db, DbName}).
+
+delete_db(DbName) ->
+    gen_server:call(?MODULE, {delete_db, DbName}).
+
+all_docs(DbName) ->
+    all_docs(DbName, []).
+
+all_docs(DbName, Args) ->
+    get_doc(DbName, "_all_docs", Args).
+
+get_doc(DbName, DocName) -> get_doc(DbName, DocName, []).
+
+get_doc(DbName, DocName, Args) ->
+    gen_server:call(?MODULE, {get_doc, DbName, DocName, Args}).
+
+save_doc(DbName, Doc) ->
+    gen_server:call(?MODULE, {save_doc, DbName, Doc}).
+
+save_doc(DbName, DocName, Doc) ->
+    save_doc(DbName, DocName, Doc, []).
+
+save_doc(DbName, DocName, Doc, Args) ->
+    gen_server:call(?MODULE, {save_doc, DbName, DocName, Doc, Args}).
+
+update_doc(DbName, DocName, Doc) ->
+    update_doc(DbName, DocName, Doc, []).
+
+update_doc(DbName, DocName, Doc, Args) ->
+    gen_server:call(?MODULE, {save_doc, DbName, DocName, Doc, Args}).
+
+delete_doc(DbName, DocName) ->
+    gen_server:call(?MODULE, {delete_doc, DbName, DocName}).
+
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
+
+%%--------------------------------------------------------------------
+%% Function: init(Args) -> {ok, State} |
+%%                         {ok, State, Timeout} |
+%%                         ignore               |
+%%                         {stop, Reason}
+%% Description: Initiates the server
+%%--------------------------------------------------------------------
+init([Options]) ->
+    ?DEBUG("inside init ~n",[]),
+        RequestFunction = case proplists:get_value(ibrowse,
 					       Options)
 			  of
 			  true ->
+			      ibrowse:start(),
 			      fun (Method, Data, Url, Args) ->
 				      ibrowse_request(Method, Data, Url, Args)
 			      end;
 			  _ ->
+			      inets:start(),
 			      fun (Method, Data, Url, Args) ->
 				      inets_request(Method, Data, Url, Args)
 			      end
 		      end,
     HostUrl = couch_get_host_url(Options),
-    Pid = spawn(fun () -> host_loop(HostUrl,RequestFunction) end),
-    Pid.
+    {ok, {HostUrl, RequestFunction}}.
 
-%% @spec all_dbs(Host::pid()) -> {DatabaseList, raw_json()}
-%% where
-%%       DatabaseList = tuple()
-%%
-%% @doc
-%%
-%%       Retrieves all dbs on the host
-%% @end
+%%--------------------------------------------------------------------
+%% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
+%%                                      {reply, Reply, State, Timeout} |
+%%                                      {noreply, State} |
+%%                                      {noreply, State, Timeout} |
+%%                                      {stop, Reason, Reply, State} |
+%%                                      {stop, Reason, State}
+%% Description: Handling call messages
+%%--------------------------------------------------------------------
+handle_call({all_dbs}, _, {Host, ReqFun}) ->
+    Reply = couch_all_dbs(Host, ReqFun),
+    {reply, Reply, {Host, ReqFun}};
 
-all_dbs(Host) ->
-    Host ! {self(), {all_dbs}},
-    receive_and_return().
+handle_call({get_db, DbName}, _, {Host, ReqFun}) ->
+    Reply = couch_get_db(Host, ReqFun, DbName),
+    {reply, Reply, {Host, ReqFun}};
 
-%% @spec get_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
-%%
-%% @doc Retrieves specified db from the host
+handle_call({all_stats}, _, {Host, ReqFun}) ->
+    Reply = couch_stats(Host ++ "_/stats", ReqFun),
+    {reply, Reply, {Host, ReqFun}};
 
-get_db(Host, DBName) ->
-    Host ! {self(), {get_db, DBName}},
-    receive_and_return().
+handle_call({stats, Stats}, _, {Host, ReqFun}) ->
+    Reply = couch_stats(Host ++ "_/stats" ++ Stats, ReqFun),
+    {reply, Reply, {Host, ReqFun}};
 
-get_all_stats(Host) ->
-    Host ! {self(), {all_stats}},
-    receive_and_return().
-
-get_stats(Host, Stats) ->
-    Host ! {self(), {stats, Stats}},
-    receive_and_return().
-
-%% @spec create_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
-%%
-%% @doc Creates specified db on the host
-
-create_db(Host, DBName) ->
-    Host ! {self(), {create_db, DBName}},
-    receive_and_return().
-
-%% @spec delete_db(Host::pid(), DBName::string()) -> DB::pid() | {error, json_object(), raw_json()}
-%%
-%% @doc Deletes specified db on the host
-
-delete_db(Host, DBName) ->
-    Host ! {self(), {delete_db, DBName}},
-    receive_and_return().
-
-%% @spec all_docs(DB::pid()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
-%%
-%% @doc Retrieves info on all docs available on the host
-%% @equiv get_doc(DB, "_all_docs")
-
-all_docs(DB) -> all_docs(DB, []).
-
-all_docs(DB, Args) ->
-    get_doc(DB, "_all_docs", Args).
-
-%% @spec get_doc(DB::pid(), DocName::string()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
-%%
-%% @doc Retrieves the entire contents of the specified document
-
-get_doc(DB, DocName) -> get_doc(DB, DocName, []).
-
-get_doc(DB, DocName, Args) ->
-    DB ! {self(), {get_doc, DocName, Args}},
-    receive_and_return().
-
-%% @spec get_doc_rev(DB::pid(), DocName::string(), Rev::integer()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
-%%
-%% @todo NOT IMPLEMENTED YET
-%%
-%% @doc
-%%    Retrieves the entire contents of the specified document for the specified revision
-%% @end
+handle_call({create_db, DbName}, _, {Host, ReqFun}) ->
+    Reply = couch_create_or_delete_db(Host, ReqFun, DbName, put),
+    {reply, Reply, {Host, ReqFun}};
 
 
-%% @spec save_doc(DB::pid(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
-%%
-%% @doc
-%%    Saves a doc to the database. The doc is assigned a server-generated ID
-%% @end
-save_doc(DB, Doc) ->
-    DB ! {self(), {save_doc, Doc}}, 
-    receive_and_return().
+handle_call({delete_db, DbName}, _, {Host, ReqFun}) ->
+    Reply = couch_create_or_delete_db(Host, ReqFun, DbName, delete),
+    {reply, Reply, {Host, ReqFun}};
 
-%% @spec save_doc(DB::pid(), DocName::string(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
-%%
-%% @doc
-%%    Saves a doc to the database with a user-supplied ID
-%% @end
-save_doc(DB, DocName, Doc) ->
-    save_doc(DB, DocName, Doc, []).
+handle_call({get_doc, DbName, DocName, Args}, _, {Host, ReqFun}) ->
+    DocUrl = Host ++ add_url_part(DbName, "/") ++ add_url_part(DocName, "/"),
+    Reply = couch_get_doc(DocUrl, ReqFun, Args),
+    {reply, Reply, {Host, ReqFun}};
 
-save_doc(DB, DocName, Doc, Args) ->
-    DB ! {self(), {save_doc, DocName, Doc, Args}},
-    receive_and_return().
+handle_call({save_doc, DbName, Doc}, _, {Host, ReqFun}) ->
+    DocUrl = Host ++ add_url_part(DbName, "/"),
+    Reply = couch_save_doc(DocUrl, ReqFun, Doc),
+    {reply, Reply, {Host, ReqFun}};
 
-%% @spec update_doc(DB::pid(), DocName::string(), Rev::integer(), Doc::proplist()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
-%%
-%% @doc
-%%    Save a doc when the doc's revision is known
-%% @end
+handle_call({save_doc, DbName, DocName, Doc, Args}, _, {Host, ReqFun}) ->
+    DocUrl = Host ++ add_url_part(DbName, "/") ++  add_url_part(DocName, "/"),
+    Reply = couch_save_doc(DocUrl, ReqFun, Doc, Args, put),
+    {reply, Reply, {Host, ReqFun}};
 
-update_doc(DB, DocName, Doc) ->
-    update_doc(DB, DocName, Doc, []).
+handle_call({delete_doc, DbName, DocName}, _, {Host, ReqFun}) ->
+    DocUrl = Host ++ add_url_part(DbName, "/") ++  add_url_part(DocName, "/"),
+    Reply = couch_delete_doc(DocUrl, ReqFun),
+    {reply, Reply, {Host, ReqFun}};
 
-update_doc(DB, DocName, Doc, Args) ->
-    DB ! {self(), {update_doc, DocName, Doc, Args}},
-    receive_and_return().
+handle_call(stop, _, {Host, ReqFun}) ->
+    ReqFun(stop, [], Host, []),
+    {stop, normal, stopped, {Host, ReqFun}}.
 
-%% @spec delete_doc(DB::pid(), DocName::string()) -> {json_object(), raw_json()} | {error, json_object(), raw_json()}
-%%
-%% @doc
-%%    Delete a doc from the database
-%% @end
 
-delete_doc(DB, DocName) ->
-    DB ! {self(), {delete_doc, DocName}},
-    receive_and_return().
+%%--------------------------------------------------------------------
+%% Function: handle_cast(Msg, State) -> {noreply, State} |
+%%                                      {noreply, State, Timeout} |
+%%                                      {stop, Reason, State}
+%% Description: Handling cast messages
+%%--------------------------------------------------------------------
+handle_cast(_Msg, State) ->
+    {noreply, State}.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%  INTERNAL FUNCTIONS                                                      %%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%--------------------------------------------------------------------
+%% Function: handle_info(Info, State) -> {noreply, State} |
+%%                                       {noreply, State, Timeout} |
+%%                                       {stop, Reason, State}
+%% Description: Handling all non call/cast messages
+%%--------------------------------------------------------------------
+handle_info(_Info, State) ->
+    {noreply, State}.
 
-host_loop(HostUrl, RequestFunction) ->
-    receive
-	{Pid, {create_db, DBName}} ->
-	    Reply = couch_create_db(HostUrl, RequestFunction, DBName),
-	    Pid ! Reply,
-	    host_loop(HostUrl, RequestFunction);
-	{Pid, {get_db, DBName}} ->
-	    Reply = couch_get_db(HostUrl, RequestFunction, DBName),
-	    Pid ! Reply,
-	    host_loop(HostUrl, RequestFunction);
-	{Pid, {all_dbs}} ->
-	    Reply = couch_all_dbs(HostUrl ++ "/_all_dbs", RequestFunction),
-	    Pid ! Reply,
-	    host_loop(HostUrl, RequestFunction);
-	{Pid, {stats, Stats}} ->
-	    Reply = couch_stats(HostUrl ++ "/_stats" ++ Stats, RequestFunction),
-	    Pid ! Reply,
-	    host_loop(HostUrl, RequestFunction);
-	{Pid, {all_stats}} ->
-	    Reply = couch_stats(HostUrl ++ "/_stats", RequestFunction),
-	    Pid ! Reply,
-	    host_loop(HostUrl, RequestFunction);
-	{Pid, {delete_db, DBName}} ->
-	    Reply = couch_delete_db(HostUrl, RequestFunction, DBName),
-	    Pid ! Reply,
-	    host_loop(HostUrl, RequestFunction)
-    end.
+%%--------------------------------------------------------------------
+%% Function: terminate(Reason, State) -> void()
+%% Description: This function is called by a gen_server when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any necessary
+%% cleaning up. When it returns, the gen_server terminates with Reason.
+%% The return value is ignored.
+%%--------------------------------------------------------------------
+terminate(_Reason, _State) ->
+    ?DEBUG("stopping now ~n",[]),
+    ok.
 
-database_loop(DbUrl, RequestFunction) ->
-    receive
-	{Pid, {get_doc, DocName, Args}} ->
-	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
-	    Reply = couch_get_doc(DocUrl, RequestFunction, Args),
-	    Pid ! Reply,
-	    database_loop(DbUrl, RequestFunction);
-	{Pid, {save_doc, Doc}} ->
-	    Reply = couch_save_doc(DbUrl, RequestFunction, Doc),
-	    Pid ! Reply,
-	    database_loop(DbUrl, RequestFunction);
-	{Pid, {save_doc, DocName, Doc, Args}} ->
-	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
-	    Reply = couch_save_doc(DocUrl, RequestFunction, Doc, Args, put),
-	    Pid ! Reply,
-	    database_loop(DbUrl, RequestFunction);
-	{Pid, {update_doc, DocName, Doc, Args}} ->
-	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
-	    Reply = couch_save_doc(DocUrl, RequestFunction, Doc, Args, put),
-	    Pid ! Reply,
-	    database_loop(DbUrl, RequestFunction);
-	{Pid, {delete_doc, DocName}} ->
-	    DocUrl = DbUrl ++ add_url_part(DocName, "/"),
-	    Reply = couch_delete_doc(DocUrl, RequestFunction),
-	    Pid ! Reply,
-	    database_loop(DbUrl, RequestFunction)
-    end.
+%%--------------------------------------------------------------------
+%% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
+%% Description: Convert process state when code is changed
+%%--------------------------------------------------------------------
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 
-%% Internal functions
-
-couch_create_db(HostUrl, RequestFunction, DbName) ->
-    DbUrl = HostUrl ++ add_url_part(DbName, "/"),
-    {Json, Raw} = RequestFunction(put, "", DbUrl, []),
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ ->
-	    Pid = spawn(fun () -> database_loop(DbUrl, RequestFunction) end), Pid
-    end.
-
-couch_delete_db(HostUrl, RequestFunction, DbName) ->
-    DbUrl = HostUrl ++ add_url_part(DbName, "/"),
-    {Json, Raw} = RequestFunction(delete, "", DbUrl, []),
+%%--------------------------------------------------------------------
+%%% Internal functions
+%%--------------------------------------------------------------------
+%% Request functions
+couch_all_dbs(HostUrl, RequestFunction) ->
+    ?DEBUG("~w",[HostUrl]),
+    {Json, Raw} = RequestFunction(get, "", HostUrl ++ "/_all_dbs", []),
     process_result(Json, Raw).
 
-couch_all_dbs(HostUrl, RequestFunction) ->    
-    {Json, Raw} = RequestFunction(get, "", HostUrl, []),
+couch_get_db(HostUrl, RequestFunction, DbName) ->
+    DbUrl = HostUrl ++ add_url_part(DbName, "/"),
+    {Json, Raw} = RequestFunction(get, [], DbUrl, []),
     process_result(Json, Raw).
 
 couch_stats(HostUrl, RequestFunction) ->    
     {Json, Raw} = RequestFunction(get, "", HostUrl, []),
     process_result(Json, Raw).
 
-couch_get_db(HostUrl, RequestFunction, DbName) ->
+couch_create_or_delete_db(HostUrl, RequestFunction, DbName, CreateOrDelete) ->
     DbUrl = HostUrl ++ add_url_part(DbName, "/"),
-    {Json, Raw} = RequestFunction(get, [], DbUrl, []),
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ ->
-	    Pid = spawn(fun () -> database_loop(DbUrl, RequestFunction) end), Pid
-    end.
+    ?DEBUG("trying to create ~s ~n",[DbUrl]),
+    {Json, Raw} = RequestFunction(CreateOrDelete, "", DbUrl, []),
+    process_result(Json, Raw).
 
 couch_get_doc(DocUrl, RequestFunction, Args) ->
     {Json, Raw} = RequestFunction(get, [], DocUrl, Args),
     process_result(Json, Raw).
-
     
 
-couch_save_doc(DbUrl, RequestFunction, Doc) ->
+couch_save_doc(DocUrl, RequestFunction, Doc) ->
     JSONDoc = iolist_to_binary(?JSON_ENCODE(Doc)),
-    {Json, Raw} = RequestFunction(post, JSONDoc, DbUrl, []),
+    {Json, Raw} = RequestFunction(post, JSONDoc, DocUrl, []),
     process_result(Json, Raw).
 
 couch_save_doc(DocUrl, RequestFunction, Doc, Args, PostOrPut) ->
@@ -311,24 +267,35 @@ couch_delete_doc(DocUrl, RequestFunction) ->
     {Json, Raw} = RequestFunction(delete, [], DocUrl, []),
     process_result(Json, Raw).
 
-%% Request functions
+
+process_result(Json, Raw) ->
+    case Json of
+	{[{<<"error">>, _},_]} -> {error, Json, Raw};
+	_ -> {ok, Json}
+    end.
+
 inets_request(Method, Data, Url, Args) ->
     Host = couch_get_url(Url, Args),
     ?DEBUG("Requesting ~s~n", [Host]),
     {ok, {_Status, _Headers, Body}} = if Method =:= post;
-					 Method =:= put ->
+					 Method =:= put;
+					 Method =:= delete ->
 					      http:request(Method,
 							   {Host,
 							    [{"Content-Type",
 							      "application/json"}],
 							    [], Data},
 							   [], []);
-					 true ->
-					      http:request(Method,
+					 true -> if Method =:= stop ->
+							 inets:stop(),
+							 {ok, {ok, ok, "[\"ok\"]"}};
+						    true ->
+							 http:request(Method,
 							   {Host,
 							    [{"Content-Type",
 							      "application/json"}]},
 							   [], [])
+						 end
 				      end,
     ?DEBUG("received ~s ~n", [Body]),
     {?JSON_DECODE(Body), Body}.
@@ -345,15 +312,19 @@ ibrowse_request(Method, Data, Url, Args) ->
 							       "application/json"}],
 							     Method, Data);
 				       true ->
-					    ibrowse:send_req(Host,
+					    if Method =:= stop ->
+						    ibrowse:stop(),
+						    {ok, ok, ok, "[\"ok\"]"};
+					       true ->
+						    ibrowse:send_req(Host,
 							     [{"Content-Type",
 							       "application/json"}],
 							     Method)
+					    end
 				    end,
     ?DEBUG("received ~s ~n", [Body]),
     {?JSON_DECODE(Body), Body}.
 
-%% Utility functions
 couch_get_url(Url,[]) ->
     Url;
 
@@ -390,52 +361,4 @@ add_url_part(Part, Prefix) ->
 	"" -> "";
 	_ -> lists:flatten([Prefix | Part])
     end.
-
-receive_and_return() ->
-    receive
-	Response -> Response after 5000 -> {error, timeout}
-			     end.
-%%
-%%
-process_result(Json, Raw) ->
-    case Json of
-	{[{<<"error">>, _},_]} -> {error, Json, Raw};
-	_ -> {ok, Json}
-    end.
-
-
-%%
-%% This test assumes a couchdb server running locally
-%%
-test() ->
-    Host = get_host([{host, "127.0.0.1"}, {port, 5984},
-		     {ibrowse, true}]),
-    Db = create_db(Host, "erl-couch"),
-    save_doc(Db,{[{<<"foo">>, <<"bar">>}, {<<"name">>, <<"boo">>}]}),
-    save_doc(Db,"myfoo%2Fbar",{[{<<"foo2">>, <<"bar2">>}, {<<"name">>, <<"boo">>}]}),
-    save_doc(Db,"_design%2FageN",{create_view("ageN", <<"javascript">>, [{<<"foo-5">>, <<"function(doc) { if (doc.age % 5 == 0 )  emit(doc.name, doc.age); }">>}])}),
-
-    delete_db(Host, "erl-couch"),
-    io:format("test complete ~n", []).
-
-
-
-%%
-%% @private
-%%
-%% helper function for creating view documents, borrowed from erlang_couchdb
-create_view(ViewClass, Language, Views) ->
-    [
-        {<<"_id">>, list_to_binary("_design/" ++ ViewClass)},
-        {<<"language">>, Language},
-        {<<"views">>, {[
-            begin
-                case View of
-                    {Name, Map} -> 
-                        {Name, {[{<<"map">>, Map}]}};
-                    {Name, Map, Reduce} ->
-                        {Name, {[{<<"map">>, Map}, {<<"reduce">>, Reduce}]}}
-                end
-            end || View <- Views
-        ]}}].
 
