@@ -147,11 +147,11 @@ handle_call({get_db, DbName}, _, {Host, ReqFun}) ->
     {reply, Reply, {Host, ReqFun}};
 
 handle_call({all_stats}, _, {Host, ReqFun}) ->
-    Reply = couch_stats(Host ++ "_/stats", ReqFun),
+    Reply = couch_stats(Host ++ "/_stats", ReqFun),
     {reply, Reply, {Host, ReqFun}};
 
 handle_call({stats, Stats}, _, {Host, ReqFun}) ->
-    Reply = couch_stats(Host ++ "_/stats" ++ Stats, ReqFun),
+    Reply = couch_stats(Host ++ "/_stats" ++ Stats, ReqFun),
     {reply, Reply, {Host, ReqFun}};
 
 handle_call({create_db, DbName}, _, {Host, ReqFun}) ->
